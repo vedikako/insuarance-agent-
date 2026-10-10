@@ -37,3 +37,24 @@ class PolicyQAResult(BaseModel):
     balance: dict[str, Any] | None = None
     tool_calls: list[ToolCallRecord] = Field(default_factory=list)
     error: AgentError | None = None
+
+
+class FraudFlag(BaseModel):
+    code: str
+    severity: Literal["medium", "high"]
+    detail: str
+
+
+class FraudReviewRequest(BaseModel):
+    claim_id: str = Field(min_length=1)
+    user_id: str
+    role: Literal["INSURANCE_COMPANY", "AUDITOR"]
+
+
+class FraudReviewResult(BaseModel):
+    agent: Literal["fraud"] = "fraud"
+    status: Literal["ok", "error"]
+    risk: Literal["low", "medium", "high"]
+    flags: list[FraudFlag] = Field(default_factory=list)
+    summary: str
+    error: AgentError | None = None
