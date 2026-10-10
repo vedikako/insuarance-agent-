@@ -11,3 +11,4 @@ langchain-core
 langchain-google-genai
 pytest
 httpx
+alembic
