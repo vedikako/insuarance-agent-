@@ -6,6 +6,9 @@ from app.ai_agents.contracts.messages import (
     FraudReviewResult,
     PolicyQARequest,
     PolicyQAResult,
+    SettlementNote,
+    SettlementRequest,
+    SettlementResult,
     ToolCallRecord,
 )
 
@@ -17,5 +20,8 @@ __all__ = [
     "FraudReviewResult",
     "PolicyQARequest",
     "PolicyQAResult",
+    "SettlementNote",
+    "SettlementRequest",
+    "SettlementResult",
     "ToolCallRecord",
 ]

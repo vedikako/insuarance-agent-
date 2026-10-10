@@ -58,3 +58,24 @@ class FraudReviewResult(BaseModel):
     flags: list[FraudFlag] = Field(default_factory=list)
     summary: str
     error: AgentError | None = None
+
+
+class SettlementNote(BaseModel):
+    code: str
+    detail: str
+
+
+class SettlementRequest(BaseModel):
+    claim_id: str = Field(min_length=1)
+    user_id: str
+    role: Literal["INSURANCE_COMPANY", "AUDITOR"]
+
+
+class SettlementResult(BaseModel):
+    agent: Literal["settlement"] = "settlement"
+    status: Literal["ok", "error"]
+    decision: Literal["approve", "partial", "deny", "review"]
+    payable_amount: float | None = None
+    notes: list[SettlementNote] = Field(default_factory=list)
+    summary: str
+    error: AgentError | None = None
