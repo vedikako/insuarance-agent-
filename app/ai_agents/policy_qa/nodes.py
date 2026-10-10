@@ -1,7 +1,10 @@
 from __future__ import annotations
 
 import json
+import logging
 from typing import Any, Literal
+
+logger = logging.getLogger(__name__)
 
 from langchain_core.runnables import RunnableConfig
 
@@ -31,6 +34,7 @@ def _history_text(history: list[dict[str, Any]]) -> str:
 
 async def supervisor_node(state: PolicyQAState, config: RunnableConfig) -> dict[str, Any]:
     llm: JsonLLM = _configurable(config)["llm"]
+    logger.info("supervisor start")
     user = (
         f"Recent turns:\n{_history_text(state.get('history') or [])}\n\n"
         f"Latest message:\n{state.get('message', '')}"
@@ -39,6 +43,7 @@ async def supervisor_node(state: PolicyQAState, config: RunnableConfig) -> dict[
         raw = await llm.complete(SUPERVISOR_PROMPT, user)
         decision = parse_json_object(raw)
     except Exception:
+        logger.exception("Policy Q&A supervisor failed")
         return {
             "error_code": "MODEL_UNAVAILABLE",
             "error_message": "The supervisor could not decide a route.",
@@ -52,6 +57,7 @@ async def supervisor_node(state: PolicyQAState, config: RunnableConfig) -> dict[
     direct_reply = str(decision.get("direct_reply") or "").strip()
     if route == "direct" and not direct_reply:
         direct_reply = DIRECT_FALLBACK
+    logger.info("supervisor route=%s tools=%s", route, tools)
     return {
         "route": route,
         "tools_needed": tools,
@@ -81,6 +87,7 @@ async def _rewrite_query(llm: JsonLLM, message: str) -> str:
 
 
 async def data_node(state: PolicyQAState, config: RunnableConfig) -> dict[str, Any]:
+    logger.info("data start tools=%s", state.get("tools_needed"))
     conf = _configurable(config)
     port: PolicyDataPort = conf["deps"]
     llm: JsonLLM = conf["llm"]
@@ -124,12 +131,14 @@ async def data_node(state: PolicyQAState, config: RunnableConfig) -> dict[str, A
     if records and len(failed) == len(records):
         update["error_code"] = "TOOL_FAILED"
         update["error_message"] = "Every policy lookup failed."
+    logger.info("data done tools=%s", [rec["tool_name"] for rec in records])
     return update
 
 
 async def synthesizer_node(state: PolicyQAState, config: RunnableConfig) -> dict[str, Any]:
     if state.get("error_code") == "TOOL_FAILED":
         return {"reply": "I could not read this policy's records just now."}
+    logger.info("synthesizer start")
     llm: JsonLLM = _configurable(config)["llm"]
     user = json.dumps(
         {
@@ -152,4 +161,5 @@ async def synthesizer_node(state: PolicyQAState, config: RunnableConfig) -> dict
     cited = parsed.get("cited_chunk_ids") or []
     if not isinstance(cited, list):
         cited = []
+    logger.info("synthesizer done chars=%s", len(reply))
     return {"reply": reply, "cited_chunk_ids": [str(item) for item in cited]}

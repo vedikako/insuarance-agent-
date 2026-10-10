@@ -1,0 +1,150 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Policy assistant</title>
+  <style>
+    :root { color-scheme: light; font-family: Georgia, "Times New Roman", serif; }
+    body { margin: 0; background: #f4f1ea; color: #1c1915; }
+    main { max-width: 720px; margin: 0 auto; padding: 32px 20px 48px; }
+    h1 { font-size: 1.8rem; font-weight: 500; margin: 0 0 8px; }
+    p.lede { margin: 0 0 24px; color: #5c564c; }
+    form, section { background: #fffdf8; border: 1px solid #e4dccf; border-radius: 12px; padding: 16px; }
+    label { display: block; font-size: 0.85rem; margin: 10px 0 4px; }
+    input, select, button, textarea { font: inherit; }
+    input, select, textarea { width: 100%; box-sizing: border-box; padding: 8px 10px; border: 1px solid #d9d0c3; border-radius: 8px; background: #fff; }
+    button { margin-top: 12px; background: #1f4d3a; color: #fff; border: 0; border-radius: 8px; padding: 8px 14px; cursor: pointer; }
+    button:disabled { opacity: 0.5; cursor: default; }
+    #chat { margin-top: 16px; display: none; }
+    .msg { margin: 10px 0; white-space: pre-wrap; }
+    .msg.user { color: #1f4d3a; }
+    .error { color: #8a2b2b; margin-top: 8px; }
+  </style>
+</head>
+<body>
+  <main>
+    <h1>Policy assistant</h1>
+    <p class="lede">Sign in, choose one of your policies, then ask about cover or how much is left.</p>
+    <form id="login">
+      <label for="email">Email</label>
+      <input id="email" type="email" autocomplete="username" required />
+      <label for="password">Password</label>
+      <input id="password" type="password" autocomplete="current-password" required />
+      <button type="submit">Sign in</button>
+      <div id="login-error" class="error"></div>
+    </form>
+    <section id="chat">
+      <label for="policy">Policy</label>
+      <select id="policy"></select>
+      <div id="thread"></div>
+      <label for="question">Question</label>
+      <textarea id="question" rows="3" placeholder="How much can I still claim?"></textarea>
+      <button id="send" type="button">Ask</button>
+      <div id="chat-error" class="error"></div>
+    </section>
+  </main>
+  <script>
+    const loginForm = document.getElementById("login");
+    const chat = document.getElementById("chat");
+    const policySelect = document.getElementById("policy");
+    const thread = document.getElementById("thread");
+    let token = "";
+    let sessionId = "";
+    let sessionPolicy = "";
+
+    function authHeaders() {
+      return { Authorization: "Bearer " + token, "Content-Type": "application/json" };
+    }
+
+    loginForm.addEventListener("submit", async (event) => {
+      event.preventDefault();
+      document.getElementById("login-error").textContent = "";
+      const response = await fetch("/api/auth/login", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          email: document.getElementById("email").value,
+          password: document.getElementById("password").value,
+        }),
+      });
+      const body = await response.json();
+      if (!response.ok) {
+        document.getElementById("login-error").textContent = body.detail || "Sign in failed";
+        return;
+      }
+      token = body.access_token;
+      loginForm.style.display = "none";
+      chat.style.display = "block";
+      await loadPolicies();
+    });
+
+    async function loadPolicies() {
+      const response = await fetch("/api/policies", { headers: authHeaders() });
+      const policies = await response.json();
+      policySelect.innerHTML = "";
+      for (const policy of policies) {
+        const option = document.createElement("option");
+        option.value = policy.id;
+        option.textContent = policy.policy_number + " · " + policy.policy_type + " · " + policy.status;
+        policySelect.appendChild(option);
+      }
+      if (!policies.length) {
+        document.getElementById("chat-error").textContent = "No policies are available for this account.";
+      }
+    }
+
+    policySelect.addEventListener("change", () => {
+      sessionId = "";
+      sessionPolicy = "";
+      thread.innerHTML = "";
+    });
+
+    document.getElementById("send").addEventListener("click", async () => {
+      const question = document.getElementById("question").value.trim();
+      const policyId = policySelect.value;
+      document.getElementById("chat-error").textContent = "";
+      if (!policyId || !question) return;
+      document.getElementById("send").disabled = true;
+      try {
+        if (sessionPolicy !== policyId) {
+          const created = await fetch("/api/policy-chat/sessions", {
+            method: "POST",
+            headers: authHeaders(),
+            body: JSON.stringify({ policy_id: policyId }),
+          });
+          const session = await created.json();
+          if (!created.ok) {
+            document.getElementById("chat-error").textContent = session.detail || "Could not open this policy";
+            return;
+          }
+          sessionId = session.session_id;
+          sessionPolicy = policyId;
+          thread.innerHTML = "";
+        }
+        const response = await fetch("/api/policy-chat/sessions/" + sessionId + "/messages", {
+          method: "POST",
+          headers: authHeaders(),
+          body: JSON.stringify({ message: question }),
+        });
+        const body = await response.json();
+        if (!response.ok) {
+          document.getElementById("chat-error").textContent = body.detail || "The assistant failed";
+          return;
+        }
+        const userLine = document.createElement("div");
+        userLine.className = "msg user";
+        userLine.textContent = question;
+        const answer = document.createElement("div");
+        answer.className = "msg";
+        answer.textContent = body.reply || body.error?.message || "";
+        thread.appendChild(userLine);
+        thread.appendChild(answer);
+        document.getElementById("question").value = "";
+      } finally {
+        document.getElementById("send").disabled = false;
+      }
+    });
+  </script>
+</body>
+</html>

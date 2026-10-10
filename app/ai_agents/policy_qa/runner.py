@@ -128,7 +128,7 @@ async def run_policy_qa(
     *,
     deps: PolicyDataPort,
     llm: JsonLLM,
-    timeout_seconds: float = 45,
+    timeout_seconds: float = 180,
 ) -> PolicyQAResult:
     graph = get_policy_qa_graph()
     initial: PolicyQAState = {

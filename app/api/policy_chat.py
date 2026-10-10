@@ -4,13 +4,19 @@ import uuid
 from typing import Any, Literal
 
 from fastapi import APIRouter, Depends, HTTPException, Request
+from jose import JWTError
 from pydantic import BaseModel, Field
+from sqlalchemy import text
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.ai_agents.contracts.messages import PolicyQARequest
 from app.ai_agents.policy_qa.llm import GeminiJsonLLM, JsonLLM
 from app.ai_agents.policy_qa.runner import run_policy_qa
 from app.api.access import can_read_policy
-from app.services.policy_data import PolicyDataPort
+from app.config import settings
+from app.core.security import decode_token
+from app.db.session import get_db
+from app.services.policy_data import PolicyDataPort, SqlPolicyData
 
 router = APIRouter(prefix="/policy-chat", tags=["policy-chat"])
 
@@ -53,18 +59,55 @@ class MemorySessionStore:
         return self._sessions.get(session_id)
 
 
-def get_actor(request: Request) -> Actor:
-    actor = getattr(request.app.state, "actor", None)
-    if actor is None:
+def _actor_role(role: str) -> str:
+    if role in {"INSURER_ADMIN", "CLAIM_ADJUSTER", "INSURANCE_COMPANY"}:
+        return "INSURANCE_COMPANY"
+    if role == "AUDITOR":
+        return "AUDITOR"
+    if role == "CUSTOMER":
+        return "CUSTOMER"
+    raise HTTPException(status_code=403, detail="This role cannot use policy chat")
+
+
+async def get_actor(
+    request: Request,
+    db: AsyncSession | None = Depends(get_db),
+) -> Actor:
+    override = getattr(request.app.state, "actor", None)
+    if override is not None:
+        return override
+    header = request.headers.get("authorization", "")
+    token = header[7:] if header.startswith("Bearer ") else request.cookies.get("access_token")
+    if not token:
         raise HTTPException(status_code=401, detail="Not authenticated")
-    return actor
+    try:
+        payload = decode_token(token)
+    except JWTError:
+        raise HTTPException(status_code=401, detail="Token invalid or expired")
+    if payload.get("type") != "access" or not payload.get("sub"):
+        raise HTTPException(status_code=401, detail="Invalid token")
+    if db is None:
+        raise HTTPException(status_code=503, detail="Database is not configured")
+    result = await db.execute(
+        text("SELECT id, role, is_active FROM users WHERE id = :id"),
+        {"id": payload["sub"]},
+    )
+    user = result.first()
+    if user is None or not user.is_active:
+        raise HTTPException(status_code=401, detail="User not found or inactive")
+    return Actor(user_id=str(user.id), role=_actor_role(user.role))
 
 
-def get_policy_data(request: Request) -> PolicyDataPort:
+async def get_policy_data(
+    request: Request,
+    db: AsyncSession | None = Depends(get_db),
+) -> PolicyDataPort:
     port = getattr(request.app.state, "policy_data", None)
-    if port is None:
+    if port is not None:
+        return port
+    if db is None:
         raise HTTPException(status_code=503, detail="Policy data is not configured")
-    return port
+    return SqlPolicyData(db)
 
 
 def get_store(request: Request) -> MemorySessionStore:
@@ -79,7 +122,7 @@ def get_llm(request: Request) -> JsonLLM:
     llm = getattr(request.app.state, "policy_qa_llm", None)
     if llm is not None:
         return llm
-    api_key = getattr(request.app.state, "gcp_api_key", "") or ""
+    api_key = settings.GCP_API_KEY or getattr(request.app.state, "gcp_api_key", "") or ""
     if not api_key:
         raise HTTPException(status_code=503, detail="Policy assistant model is not configured")
     return GeminiJsonLLM(api_key)
