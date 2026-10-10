@@ -1,8 +1,13 @@
 import asyncio
 
+from fastapi.testclient import TestClient
+
 from app.ai_agents.contracts.messages import FraudReviewRequest
 from app.ai_agents.fraud.rules import score_claim
 from app.ai_agents.fraud.runner import run_fraud_review
+from app.api.policy_chat import Actor
+from app.main import app
+from app.services.fraud_data import build_claim_snapshot
 
 CLEAN = {
     "claim_amount": 10000,
@@ -66,3 +71,50 @@ def test_missing_claim_is_an_error():
     assert result.error is not None
     assert result.error.code == "BAD_INPUT"
     assert result.flags == []
+
+
+def test_snapshot_uses_ledger_remaining_and_other_amounts():
+    snapshot = build_claim_snapshot(
+        claim_amount=10000,
+        approved_amount=None,
+        policy_status="ACTIVE",
+        sum_insured=500000,
+        utilized=20000,
+        other_claim_amounts=[2500, None],
+    )
+    assert snapshot["remaining_balance"] == 480000
+    assert snapshot["sum_insured"] == 500000
+    assert snapshot["other_claim_amounts"] == [2500]
+
+
+def _client(actor: Actor, claims: MemoryClaims) -> TestClient:
+    app.state.actor = actor
+    app.state.fraud_data = claims
+    return TestClient(app)
+
+
+def test_customer_cannot_review_a_claim():
+    data = MemoryClaims({"c1": dict(CLEAN)})
+    client = _client(Actor(user_id="u1", role="CUSTOMER"), data)
+    response = client.post("/api/fraud/reviews", json={"claim_id": "c1"})
+    assert response.status_code == 403
+    assert data.calls == []
+
+
+def test_adjuster_receives_a_review():
+    data = MemoryClaims({"c1": dict(CLEAN)})
+    client = _client(Actor(user_id="adj-1", role="INSURANCE_COMPANY"), data)
+    response = client.post("/api/fraud/reviews", json={"claim_id": "c1"})
+    assert response.status_code == 200
+    body = response.json()
+    assert body["agent"] == "fraud"
+    assert body["risk"] == "low"
+    assert body["flags"] == []
+    assert data.calls == ["c1"]
+
+
+def test_unknown_claim_is_not_found():
+    data = MemoryClaims({})
+    client = _client(Actor(user_id="adj-1", role="AUDITOR"), data)
+    response = client.post("/api/fraud/reviews", json={"claim_id": "missing"})
+    assert response.status_code == 404
