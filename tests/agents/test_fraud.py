@@ -54,6 +54,15 @@ def test_duplicate_amount_is_medium():
     assert scored["flags"][0]["code"] == "DUPLICATE_AMOUNT"
 
 
+def test_missing_amount_and_approved_above_claimed():
+    missing = score_claim({**CLEAN, "claim_amount": None})
+    assert missing["risk"] == "medium"
+    assert missing["flags"][0]["code"] == "MISSING_AMOUNT"
+    approved = score_claim({**CLEAN, "approved_amount": 15000})
+    assert approved["risk"] == "high"
+    assert approved["flags"][0]["code"] == "APPROVED_ABOVE_CLAIMED"
+
+
 def test_runner_returns_flags_for_a_stored_claim():
     data = MemoryClaims({"c1": {**CLEAN, "policy_status": "LAPSED"}})
     result = asyncio.run(run_fraud_review(_request(), deps=data))
@@ -118,3 +127,22 @@ def test_unknown_claim_is_not_found():
     client = _client(Actor(user_id="adj-1", role="AUDITOR"), data)
     response = client.post("/api/fraud/reviews", json={"claim_id": "missing"})
     assert response.status_code == 404
+
+
+def test_review_requires_sign_in():
+    app.state.actor = None
+    app.state.fraud_data = MemoryClaims({"c1": dict(CLEAN)})
+    response = TestClient(app).post("/api/fraud/reviews", json={"claim_id": "c1"})
+    assert response.status_code == 401
+
+
+def test_lookup_failure_returns_503():
+    class BrokenClaims:
+        async def load_claim(self, claim_id: str) -> dict | None:
+            raise RuntimeError("database unavailable")
+
+    app.state.actor = Actor(user_id="adj-1", role="INSURANCE_COMPANY")
+    app.state.fraud_data = BrokenClaims()
+    response = TestClient(app).post("/api/fraud/reviews", json={"claim_id": "c1"})
+    assert response.status_code == 503
+    assert response.json()["detail"] == "The claim lookup failed."
