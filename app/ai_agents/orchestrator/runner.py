@@ -53,6 +53,75 @@ def _iso(value: Any) -> str | None:
     return str(value)
 
 
+_DOCUMENT_TYPES = {
+    "HOSPITAL_BILL",
+    "DISCHARGE_SUMMARY",
+    "AADHAAR",
+    "PAN",
+    "REPAIR_ESTIMATE",
+    "FIR",
+    "RC",
+}
+_MIME = {
+    "application/pdf": "application/pdf",
+    "image/png": "image/png",
+    "image/jpeg": "image/jpeg",
+    "image/jpg": "image/jpeg",
+}
+
+
+def _cell(row: Any, name: str) -> Any:
+    if isinstance(row, dict):
+        return row.get(name)
+    return getattr(row, name, None)
+
+
+def document_mime(content_type: Any, filename: Any) -> str | None:
+    raw = str(content_type or "").split(";")[0].strip().lower()
+    if raw in _MIME:
+        return _MIME[raw]
+    name = str(filename or "").lower()
+    if name.endswith(".pdf"):
+        return "application/pdf"
+    if name.endswith(".png"):
+        return "image/png"
+    if name.endswith((".jpg", ".jpeg")):
+        return "image/jpeg"
+    return None
+
+
+def id_last4(number: Any) -> str | None:
+    digits = "".join(ch for ch in str(number or "") if ch.isdigit())
+    if len(digits) < 4:
+        return None
+    return digits[-4:]
+
+
+def document_refs_from_rows(rows: list[Any]) -> list[dict[str, str]]:
+    """Keep only files the document agent knows how to read."""
+    refs: list[dict[str, str]] = []
+    for row in rows:
+        type_code = str(_cell(row, "document_type_code") or "").upper()
+        if type_code not in _DOCUMENT_TYPES:
+            continue
+        filename = str(_cell(row, "original_filename") or f"{type_code.lower()}.bin")
+        mime = document_mime(_cell(row, "content_type"), filename)
+        storage_uri = str(_cell(row, "storage_path") or "").strip()
+        document_id = str(_cell(row, "id") or "")
+        if mime is None or not storage_uri or not document_id:
+            continue
+        refs.append(
+            {
+                "document_id": document_id,
+                "type_code": type_code,
+                "mime": mime,
+                "storage_uri": storage_uri,
+                "filename": filename,
+            }
+        )
+    return refs
+
+
 def context_from_rows(
     *,
     claim_id: str,
@@ -64,6 +133,7 @@ def context_from_rows(
     sum_insured: Any,
     insured_name: Any,
     utilized: Any,
+    claim_type: Any | None = None,
     documents: list[dict[str, Any]] | None = None,
     recent_claims_30d: int = 0,
     total_claim_amount_90d: float = 0,
@@ -75,7 +145,8 @@ def context_from_rows(
     """Build the facts the orchestrator copies into worker requests."""
     sum_value = _money(sum_insured)
     used = _money(utilized)
-    claim_type = str(policy_type or "HEALTH").upper()
+    raw_type = claim_type if claim_type not in (None, "") else policy_type
+    claim_type = str(raw_type or "HEALTH").upper()
     if claim_type not in {"HEALTH", "MOTOR"}:
         claim_type = "HEALTH"
     return {
@@ -113,7 +184,8 @@ async def load_claim_context(db: AsyncSession, claim_id: str) -> dict[str, Any] 
     result = await db.execute(
         text(
             """
-            SELECT c.claim_amount, c.policy_id, p.policy_type, p.start_date, p.end_date,
+            SELECT c.claim_amount, c.policy_id, c.user_id, c.claim_type, c.incident_date,
+                   c.description, c.situation_details, p.policy_type, p.start_date, p.end_date,
                    p.sum_insured, p.insured_name
             FROM claims c
             JOIN policies p ON p.id = c.policy_id
@@ -152,18 +224,59 @@ async def load_claim_context(db: AsyncSession, claim_id: str) -> dict[str, Any] 
         {"policy_id": str(row.policy_id), "claim_id": claim_id},
     )
     counts = recent.first()
+    files = await db.execute(
+        text(
+            """
+            SELECT id, document_type_code, storage_path, original_filename, content_type, diagnosis
+            FROM claim_documents
+            WHERE claim_id = :claim_id
+            ORDER BY id
+            """
+        ),
+        {"claim_id": claim_id},
+    )
+    file_rows = list(files)
+    details = row.situation_details if isinstance(row.situation_details, dict) else {}
+    diagnosis = str(details.get("diagnosis") or "")
+    if not diagnosis:
+        for item in file_rows:
+            if item.diagnosis:
+                diagnosis = str(item.diagnosis)
+                break
+    identity = await db.execute(
+        text(
+            """
+            SELECT document_number
+            FROM kyc_documents
+            WHERE user_id = :user_id
+              AND is_active = true
+              AND document_type IN ('AADHAAR', 'PAN')
+              AND document_number IS NOT NULL
+            ORDER BY CASE document_type WHEN 'AADHAAR' THEN 0 ELSE 1 END
+            LIMIT 1
+            """
+        ),
+        {"user_id": str(row.user_id)},
+    )
+    identity_row = identity.first()
     return context_from_rows(
         claim_id=claim_id,
         policy_id=str(row.policy_id),
         claim_amount=row.claim_amount,
+        claim_type=row.claim_type,
         policy_type=row.policy_type,
         start_date=row.start_date,
         end_date=row.end_date,
         sum_insured=row.sum_insured,
         insured_name=row.insured_name,
         utilized=balance.scalar(),
+        documents=document_refs_from_rows(file_rows),
         recent_claims_30d=int(counts.claims_30d or 0) if counts else 0,
         total_claim_amount_90d=float(counts.amount_90d or 0) if counts else 0,
+        diagnosis=diagnosis,
+        incident_summary=str(row.description or ""),
+        incident_date=_iso(row.incident_date),
+        policyholder_id_last4=id_last4(identity_row.document_number) if identity_row else None,
     )
 
 
@@ -212,16 +325,32 @@ def _failed_package(claim_id: str, review_run_id: str, code: str, message: str) 
     )
 
 
-async def _default_workers() -> dict[str, Any]:
+async def _default_workers(db: AsyncSession | None, llm: Any | None) -> dict[str, Any]:
+    """Document and eligibility are Vedika's review workers. Fraud is called beside them."""
     from app.ai_agents.document.runner import run_document_agent
     from app.ai_agents.eligibility.runner import run_eligibility_agent
     from app.ai_agents.fraud.runner import run_fraud_agent
+    from app.services.policy_retrieval import rank_chunks, retrieve_clauses
+    from app.services.review_inputs import registered_clauses
 
-    return {
-        "document": run_document_agent,
-        "eligibility": run_eligibility_agent,
-        "fraud": run_fraud_agent,
-    }
+    async def document(request: Any) -> Any:
+        return await run_document_agent(request, llm=llm)
+
+    async def clauses(policy_id: str, query: str) -> list[dict[str, Any]]:
+        registered = registered_clauses(policy_id)
+        if registered is not None:
+            return rank_chunks(registered, query, k=4)
+        if db is None:
+            return []
+        return await retrieve_clauses(policy_id, query, db)
+
+    async def eligibility(request: Any) -> Any:
+        return await run_eligibility_agent(request, clauses=clauses, llm=llm)
+
+    async def fraud(request: Any) -> Any:
+        return await run_fraud_agent(request)
+
+    return {"document": document, "eligibility": eligibility, "fraud": fraud}
 
 
 def _validate(model: type[Any], payload: dict[str, Any] | None) -> Any:
@@ -290,9 +419,11 @@ async def run_review(
         await review_store.finish(request.claim_id, review_run_id, package)
         return package
 
+    allow_model = _model_allowed(use_model)
+    llm = _llm() if allow_model else None
     if workers is None:
         try:
-            workers = await _default_workers()
+            workers = await _default_workers(db, llm)
         except Exception:
             logger.exception("review workers are not available")
             package = _failed_package(
@@ -306,9 +437,6 @@ async def run_review(
     started = await review_store.start(request.claim_id, review_run_id)
     if started != review_run_id:
         return await review_store.running_package(request.claim_id, started)
-
-    allow_model = _model_allowed(use_model)
-    llm = _llm() if allow_model else None
     initial: OrchestratorState = {
         "review_run_id": review_run_id,
         "claim_id": request.claim_id,

@@ -27,7 +27,7 @@ def get_sessionmaker() -> async_sessionmaker[AsyncSession]:
 
 async def get_db(request: Request) -> AsyncGenerator[AsyncSession | None, None]:
     """Yield a session. Tests that inject policy data skip the database."""
-    if getattr(request.app.state, "policy_data", None) is not None:
+    if getattr(request.app.state, "policy_data", None) is not None or getattr(request.app.state, "review_runner", None) is not None:
         yield None
         return
     factory = get_sessionmaker()
