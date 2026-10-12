@@ -58,3 +58,10 @@ async def run_fraud_review(
         flags=flags,
         summary=final.get("summary") or "",
     )
+
+
+async def run_fraud_agent(request, *, reader=None):
+    """Score uploaded document fields. This is not the stored-claim rules scorer."""
+    from app.ai_agents.fraud.forensics.runner import run_fraud_agent as _run
+
+    return await _run(request, reader=reader)
