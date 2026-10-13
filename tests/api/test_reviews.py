@@ -5,7 +5,15 @@ from app.ai_agents.orchestrator.runner import document_refs_from_rows, id_last4
 from app.api.policy_chat import Actor
 from app.main import app
 
-_STATE_KEYS = ("actor", "policy_data", "policy_qa_llm", "chat_sessions", "review_runner")
+_STATE_KEYS = (
+    "actor",
+    "policy_data",
+    "policy_qa_llm",
+    "chat_sessions",
+    "review_runner",
+    "settlement_data",
+    "claim_catalog",
+)
 
 
 def _clear_state() -> None:

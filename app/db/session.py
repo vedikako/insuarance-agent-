@@ -25,18 +25,34 @@ def get_sessionmaker() -> async_sessionmaker[AsyncSession]:
     return _sessionmaker
 
 
-async def get_db(request: Request) -> AsyncGenerator[AsyncSession | None, None]:
+# async def get_db(request: Request) -> AsyncGenerator[AsyncSession | None, None]:
+# <<<<<<< HEAD
+# async def get_db(request: Request) -> AsyncGenerator[AsyncSession | None, None]:
+#     """Yield a session. Tests that inject data ports skip the database."""
+#     state = request.app.state
+#     if (
+#         getattr(state, "policy_data", None) is not None
+#         or getattr(state, "fraud_data", None) is not None
+#         or getattr(state, "review_runner", None) is not None
+#     ):
+# =======
+#     """Yield a session. Tests that inject policy data skip the database."""
+#     injected = ("policy_data", "review_runner", "settlement_data", "claim_catalog")
+#     if any(getattr(request.app.state, name, None) is not None for name in injected):
+# >>>>>>> 99b37f9 (Add the insurer claim review page and settlement advice.)
+#         yield None
+#         return
+        
+#     factory = get_sessionmaker()
+#     async with factory() as session:
+#         yield session
 async def get_db(request: Request) -> AsyncGenerator[AsyncSession | None, None]:
     """Yield a session. Tests that inject data ports skip the database."""
     state = request.app.state
-    if (
-        getattr(state, "policy_data", None) is not None
-        or getattr(state, "fraud_data", None) is not None
-        or getattr(state, "review_runner", None) is not None
-    ):
+    injected = ("policy_data", "fraud_data", "review_runner", "settlement_data", "claim_catalog")
+    if any(getattr(state, name, None) is not None for name in injected):
         yield None
         return
-        
     factory = get_sessionmaker()
     async with factory() as session:
         yield session
