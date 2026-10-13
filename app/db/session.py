@@ -26,11 +26,17 @@ def get_sessionmaker() -> async_sessionmaker[AsyncSession]:
 
 
 async def get_db(request: Request) -> AsyncGenerator[AsyncSession | None, None]:
+async def get_db(request: Request) -> AsyncGenerator[AsyncSession | None, None]:
     """Yield a session. Tests that inject data ports skip the database."""
     state = request.app.state
-    if getattr(state, "policy_data", None) is not None or getattr(state, "fraud_data", None) is not None:
+    if (
+        getattr(state, "policy_data", None) is not None
+        or getattr(state, "fraud_data", None) is not None
+        or getattr(state, "review_runner", None) is not None
+    ):
         yield None
         return
+        
     factory = get_sessionmaker()
     async with factory() as session:
         yield session
