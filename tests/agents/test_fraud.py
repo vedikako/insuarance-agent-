@@ -7,7 +7,7 @@ from app.ai_agents.fraud.rules import score_claim
 from app.ai_agents.fraud.runner import run_fraud_review
 from app.api.policy_chat import Actor
 from app.main import app
-from app.services.fraud_data import build_claim_snapshot
+from app.services.fraud_data import SqlFraudData, build_claim_snapshot
 
 CLEAN = {
     "claim_amount": 10000,
@@ -80,6 +80,20 @@ def test_missing_claim_is_an_error():
     assert result.error is not None
     assert result.error.code == "BAD_INPUT"
     assert result.flags == []
+
+
+def test_invalid_claim_id_is_not_queried():
+    class Session:
+        called = False
+
+        async def execute(self, *args, **kwargs):
+            self.called = True
+            raise AssertionError("an invalid id must not be sent to the database")
+
+    session = Session()
+    result = asyncio.run(SqlFraudData(session).load_claim("missing-claim"))  # type: ignore[arg-type]
+    assert result is None
+    assert session.called is False
 
 
 def test_snapshot_uses_ledger_remaining_and_other_amounts():

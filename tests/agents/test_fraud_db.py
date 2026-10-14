@@ -74,7 +74,7 @@ async def _check_live_database() -> None:
         }
         scored = score_claim(snapshot)
         assert scored["risk"] in {"low", "medium", "high"}
-        absent = await data.load_claim("missing-claim")
+        absent = await data.load_claim("00000000-0000-0000-0000-000000000000")
         assert absent is None
 
 
