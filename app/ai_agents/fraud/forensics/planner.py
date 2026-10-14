@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from app.ai_agents.fraud.forensics.tools import FLAG_TOOL
+from app.ai_agents.fraud.forensics.tools import FLAG_TOOL, early_claim
 
 
 def planned_tools(request: dict[str, Any]) -> list[str]:
@@ -19,7 +19,11 @@ def planned_tools(request: dict[str, Any]) -> list[str]:
         names.append("image_forensics")
     if types & {"AADHAAR", "PAN"}:
         names.append("id_redaction")
-    if int(behavior.get("recent_claims_30d") or 0) >= 3 or int(behavior.get("prior_fraud_flags") or 0) > 0:
+    if (
+        int(behavior.get("recent_claims_30d") or 0) >= 3
+        or int(behavior.get("prior_fraud_flags") or 0) > 0
+        or early_claim(request)
+    ):
         names.append("behavioral")
     if "DISCHARGE_SUMMARY" in types:
         names.append("content_review")

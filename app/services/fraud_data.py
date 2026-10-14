@@ -3,9 +3,18 @@
 from __future__ import annotations
 
 from typing import Any
+from uuid import UUID
 
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
+
+
+def claim_uuid(value: str) -> str | None:
+    """Claim ids are UUIDs. Anything else is not a stored claim."""
+    try:
+        return str(UUID(str(value)))
+    except (ValueError, AttributeError, TypeError):
+        return None
 
 
 def build_claim_snapshot(
@@ -39,6 +48,9 @@ class SqlFraudData:
         self.db = db
 
     async def load_claim(self, claim_id: str) -> dict[str, Any] | None:
+        claim_id = claim_uuid(claim_id) or ""
+        if not claim_id:
+            return None
         result = await self.db.execute(
             text(
                 """
@@ -71,7 +83,9 @@ class SqlFraudData:
                 """
                 SELECT claim_amount
                 FROM claims
-                WHERE policy_id = :policy_id AND id <> :claim_id
+                WHERE policy_id = :policy_id
+                  AND id <> :claim_id
+                  AND UPPER(status::text) NOT IN ('REJECTED', 'CANCELLED', 'CANCELED')
                 """
             ),
             {"policy_id": policy_id, "claim_id": claim_id},
