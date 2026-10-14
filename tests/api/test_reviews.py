@@ -13,6 +13,8 @@ _STATE_KEYS = (
     "review_runner",
     "settlement_data",
     "claim_catalog",
+    "claim_records",
+    "policy_catalog",
 )
 
 
