@@ -1,0 +1,113 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Claim status</title>
+  <style>
+    :root { color-scheme: light; font-family: Georgia, "Times New Roman", serif; }
+    body { margin: 0; background: #f4f1ea; color: #1c1915; }
+    main { max-width: 720px; margin: 0 auto; padding: 32px 20px 48px; }
+    h1 { font-size: 1.8rem; font-weight: 500; margin: 0 0 8px; }
+    p.lede { margin: 0 0 24px; color: #5c564c; }
+    form, section, article { background: #fffdf8; border: 1px solid #e4dccf; border-radius: 12px; padding: 16px; }
+    article { margin-top: 12px; }
+    label { display: block; font-size: 0.85rem; margin: 10px 0 4px; }
+    input, button { font: inherit; }
+    input { width: 100%; box-sizing: border-box; padding: 8px 10px; border: 1px solid #d9d0c3; border-radius: 8px; background: #fff; }
+    button { margin-top: 12px; background: #1f4d3a; color: #fff; border: 0; border-radius: 8px; padding: 8px 14px; cursor: pointer; }
+    #list { display: none; }
+    h2 { font-size: 1.1rem; font-weight: 500; margin: 0 0 8px; }
+    .error { color: #8a2b2b; margin-top: 8px; }
+    a { color: #1f4d3a; }
+  </style>
+</head>
+<body>
+  <main>
+    <h1>Claim status</h1>
+    <p class="lede">Sign in to see the claims you filed and whether the insurer accepted them.</p>
+    <form id="login">
+      <label for="email">Email</label>
+      <input id="email" type="email" autocomplete="username" required />
+      <label for="password">Password</label>
+      <input id="password" type="password" autocomplete="current-password" required />
+      <button type="submit">Sign in</button>
+      <div id="login-error" class="error"></div>
+    </form>
+    <section id="list"></section>
+    <p class="lede"><a href="/file">File a claim</a> · <a href="/">Policy assistant</a></p>
+  </main>
+  <script>
+    async function readJson(response) {
+      const text = await response.text();
+      try {
+        return text ? JSON.parse(text) : {};
+      } catch (err) {
+        return {};
+      }
+    }
+
+    const loginForm = document.getElementById("login");
+    const list = document.getElementById("list");
+    let token = "";
+
+    loginForm.addEventListener("submit", async (event) => {
+      event.preventDefault();
+      document.getElementById("login-error").textContent = "";
+      const response = await fetch("/api/auth/login", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          email: document.getElementById("email").value,
+          password: document.getElementById("password").value,
+        }),
+      });
+      const body = await readJson(response);
+      if (!response.ok) {
+        document.getElementById("login-error").textContent = body.detail || "Sign in failed";
+        return;
+      }
+      if (body.user.role !== "CUSTOMER") {
+        document.getElementById("login-error").textContent = "Sign in as the customer who filed the claim.";
+        return;
+      }
+      token = body.access_token;
+      loginForm.style.display = "none";
+      list.style.display = "block";
+      await loadClaims();
+    });
+
+    function outcome(claim) {
+      if (claim.status === "APPROVED") {
+        return "Accepted. Payable " + (claim.approved_amount == null ? "" : claim.approved_amount);
+      }
+      if (claim.status === "REJECTED") {
+        return "Rejected";
+      }
+      return claim.status;
+    }
+
+    async function loadClaims() {
+      const response = await fetch("/api/claims", {
+        headers: { Authorization: "Bearer " + token },
+      });
+      const claims = await response.json();
+      list.innerHTML = "";
+      if (!claims.length) {
+        list.textContent = "You have not filed a claim yet.";
+        return;
+      }
+      for (const claim of claims) {
+        const card = document.createElement("article");
+        const title = document.createElement("h2");
+        title.textContent = claim.claim_number + " · " + claim.policy_number;
+        const detail = document.createElement("p");
+        detail.textContent = "Amount " + claim.claim_amount + ". " + outcome(claim);
+        card.appendChild(title);
+        card.appendChild(detail);
+        list.appendChild(card);
+      }
+    }
+  </script>
+</body>
+</html>

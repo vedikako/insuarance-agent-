@@ -15,7 +15,8 @@
     label { display: block; font-size: 0.85rem; margin: 10px 0 4px; }
     input, select, button { font: inherit; }
     input, select { width: 100%; box-sizing: border-box; padding: 8px 10px; border: 1px solid #d9d0c3; border-radius: 8px; background: #fff; }
-    button { margin-top: 12px; background: #1f4d3a; color: #fff; border: 0; border-radius: 8px; padding: 8px 14px; cursor: pointer; }
+    button { margin-top: 12px; margin-right: 8px; background: #1f4d3a; color: #fff; border: 0; border-radius: 8px; padding: 8px 14px; cursor: pointer; }
+    button.reject { background: #8a2b2b; }
     button:disabled { opacity: 0.5; cursor: default; }
     #desk { display: none; }
     #result { display: none; }
@@ -58,9 +59,15 @@
         <dd id="decision"></dd>
         <dt>Payable amount</dt>
         <dd id="payable"></dd>
+        <dt>Claim status</dt>
+        <dd id="claim-status"></dd>
       </dl>
+      <p class="lede">Accept or Reject saves your choice on this claim. Closing the page before that drops the recommendation.</p>
+      <button id="accept" type="button">Accept</button>
+      <button id="reject" class="reject" type="button">Reject</button>
+      <div id="decision-error" class="error"></div>
     </section>
-    <p class="lede"><a href="/">Policy assistant</a></p>
+    <p class="lede"><a href="/file">File a claim</a> · <a href="/status">Claim status</a> · <a href="/">Policy assistant</a></p>
   </main>
   <script>
     const loginForm = document.getElementById("login");
@@ -88,7 +95,7 @@
           password: document.getElementById("password").value,
         }),
       });
-      const body = await response.json();
+      const body = await readJson(response);
       if (!response.ok) {
         document.getElementById("login-error").textContent = body.detail || "Sign in failed";
         return;
@@ -168,11 +175,46 @@
         showText("narrative", review.narrative || "");
         showText("decision", settlement.decision || "");
         showText("payable", settlement.payable_amount == null ? "" : String(settlement.payable_amount));
+        showText("claim-status", "Not saved yet");
+        document.getElementById("accept").disabled = false;
+        document.getElementById("reject").disabled = false;
         document.getElementById("result").style.display = "block";
       } finally {
         document.getElementById("run").disabled = false;
       }
     });
+
+    async function saveChoice(choice) {
+      const id = claimId.value.trim();
+      const error = document.getElementById("decision-error");
+      error.textContent = "";
+      const payableText = document.getElementById("payable").textContent.trim();
+      const body = { choice: choice };
+      if (choice === "accept" && payableText) {
+        body.payable_amount = Number(payableText);
+      }
+      document.getElementById("accept").disabled = true;
+      document.getElementById("reject").disabled = true;
+      const response = await fetch("/api/claims/" + id + "/decision", {
+        method: "POST",
+        headers: authHeaders(),
+        body: JSON.stringify(body),
+      });
+      const saved = await readJson(response);
+      if (!response.ok) {
+        error.textContent = saved.detail || "The decision was not saved";
+        document.getElementById("accept").disabled = false;
+        document.getElementById("reject").disabled = false;
+        return;
+      }
+      showText("claim-status", saved.status);
+      await loadClaims();
+      claimId.value = id;
+      claimSelect.value = id;
+    }
+
+    document.getElementById("accept").addEventListener("click", () => saveChoice("accept"));
+    document.getElementById("reject").addEventListener("click", () => saveChoice("reject"));
   </script>
 </body>
 </html>
