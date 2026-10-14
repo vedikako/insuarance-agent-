@@ -68,7 +68,13 @@
           password: document.getElementById("password").value,
         }),
       });
-      const body = await response.json();
+      const raw = await response.text();
+      let body = {};
+      try {
+        body = raw ? JSON.parse(raw) : {};
+      } catch (err) {
+        body = {};
+      }
       if (!response.ok) {
         document.getElementById("login-error").textContent = body.detail || "Sign in failed";
         return;

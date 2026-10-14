@@ -192,6 +192,34 @@ def test_invented_amount_is_replaced():
     assert reply == LEDGER_ONLY
 
 
+def test_balance_answers_when_the_model_is_down():
+    class DownLLM:
+        async def complete(self, system: str, user: str) -> str:
+            raise RuntimeError("503")
+
+    result = asyncio.run(
+        run_policy_qa(_request("How much can I still claim?"), deps=MemoryPolicies(), llm=DownLLM())
+    )
+    assert result.status == "ok"
+    assert result.route == "data"
+    assert [call.tool_name for call in result.tool_calls] == ["get_balance"]
+    assert "480000" in result.reply
+    assert "20000" in result.reply
+
+
+def test_supervisor_failure_still_reads_wording():
+    class SupervisorDown(ScriptLLM):
+        async def complete(self, system: str, user: str) -> str:
+            if system.startswith("You are the supervisor"):
+                raise RuntimeError("503")
+            return await ScriptLLM.complete(self, system, user)
+
+    result = asyncio.run(run_policy_qa(_request("Is cataract covered?"), deps=MemoryPolicies(), llm=SupervisorDown()))
+    assert result.status == "ok"
+    assert result.tool_calls[0].tool_name == "retrieve_clauses"
+    assert "Cataract surgery is covered as a day care procedure." in result.reply
+
+
 def test_customer_cannot_open_another_users_policy():
     data = MemoryPolicies()
     app.state.actor = Actor(user_id="u1", role="CUSTOMER")
