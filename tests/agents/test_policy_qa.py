@@ -192,6 +192,25 @@ def test_invented_amount_is_replaced():
     assert reply == LEDGER_ONLY
 
 
+def test_coverage_wording_survives_a_repeated_balance():
+    reply = enforce_amount_rule(
+        "You can still claim 400000 INR. Cataract surgery is covered as a day care procedure.",
+        {},
+        ["Cataract surgery is covered as a day care procedure."],
+    )
+    assert "Cataract surgery is covered as a day care procedure." in reply
+    assert "400000" not in reply
+
+
+def test_waiting_period_days_are_not_treated_as_rupees():
+    reply = enforce_amount_rule(
+        "The initial waiting period is 30 days except accidents.",
+        {},
+        [],
+    )
+    assert reply == "The initial waiting period is 30 days except accidents."
+
+
 def test_balance_answers_when_the_model_is_down():
     class DownLLM:
         async def complete(self, system: str, user: str) -> str:

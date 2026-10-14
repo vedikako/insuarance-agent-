@@ -210,7 +210,7 @@ async def synthesizer_node(state: PolicyQAState, config: RunnableConfig) -> dict
         {
             "message": state.get("message"),
             "history": state.get("history") or [],
-            "data_context": state.get("data_context") or {},
+            "data_context": context,
         },
         default=str,
     )
@@ -219,7 +219,7 @@ async def synthesizer_node(state: PolicyQAState, config: RunnableConfig) -> dict
         parsed = parse_json_object(raw)
     except Exception:
         logger.exception("Policy Q&A synthesizer failed")
-        reply = reply_from_records(state.get("data_context") or {})
+        reply = reply_from_records(context)
         if reply:
             return {"reply": reply, "cited_chunk_ids": []}
         return {
