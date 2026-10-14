@@ -6,7 +6,7 @@ writes that change a claim's status.
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import date, datetime, timezone
 from uuid import uuid4
 
 from fastapi import APIRouter, Depends, File, Form, HTTPException, Request, UploadFile
@@ -224,7 +224,12 @@ async def file_claim(
     claim_id = str(uuid4())
     claim_number = f"CLM-{str(policy['policy_type'])[:3].upper()}-{claim_id.split('-')[0].upper()}"
     now = datetime.now(timezone.utc)
-    incident = incident_date.strip() or None
+    incident = None
+    if incident_date.strip():
+        try:
+            incident = date.fromisoformat(incident_date.strip())
+        except ValueError:
+            raise HTTPException(status_code=400, detail="The incident date is not valid")
     claim = {
         "id": claim_id,
         "user_id": actor.user_id,
