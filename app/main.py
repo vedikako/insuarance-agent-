@@ -2,6 +2,7 @@ import logging
 from pathlib import Path
 
 from fastapi import FastAPI
+from fastapi.staticfiles import StaticFiles
 
 logging.basicConfig(level=logging.INFO)
 from fastapi.responses import FileResponse
@@ -27,6 +28,11 @@ _STATIC = Path(__file__).resolve().parent / "static"
 
 
 @app.get("/")
+async def home_page():
+    return FileResponse(_STATIC / "home.html")
+
+
+@app.get("/chat")
 async def chat_page():
     return FileResponse(_STATIC / "chat.html")
 
@@ -44,3 +50,6 @@ async def file_page():
 @app.get("/status")
 async def status_page():
     return FileResponse(_STATIC / "status.html")
+
+
+app.mount("/static", StaticFiles(directory=_STATIC), name="static")

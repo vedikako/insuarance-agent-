@@ -22,6 +22,8 @@ LEDGER_ONLY = "I can only state amounts that are stored on this policy's ledger.
 NOT_FOUND = "I could not find that wording in this policy's documents."
 _DATE = re.compile(r"\d{4}-\d{2}-\d{2}")
 _NUMBER = re.compile(r"\d+(?:\.\d+)?")
+_CURRENCY = re.compile(r"inr|rs\.?|rupees?", re.IGNORECASE)
+_SENTENCE = re.compile(r"[^.!?\n]+(?:[.!?]+|\n+|$)")
 
 
 def _normalize_amount(raw: str) -> Decimal | None:
@@ -32,14 +34,17 @@ def _normalize_amount(raw: str) -> Decimal | None:
 
 
 def extract_amounts(text: str) -> set[Decimal]:
+    """Rupee figures. Day and month counts such as 30 or 36 are not amounts."""
     cleaned = _DATE.sub(" ", text)
     cleaned = re.sub(r"(?<=\d),(?=\d)", "", cleaned)
     found: set[Decimal] = set()
-    for match in _NUMBER.findall(cleaned):
-        number = _normalize_amount(match)
-        if number is None:
+    for match in _NUMBER.finditer(cleaned):
+        raw = match.group(0)
+        number = _normalize_amount(raw)
+        if number is None or number < 10:
             continue
-        if number >= 10 or "." in match:
+        window = cleaned[max(0, match.start() - 12) : match.end() + 12]
+        if number >= 100 or "." in raw or _CURRENCY.search(window):
             found.add(number)
     return found
 
@@ -71,12 +76,21 @@ def allowed_amounts(data_context: dict[str, Any], quotes: list[str]) -> set[Deci
     return found
 
 
+def _has_disallowed_amount(text: str, allowed: set[Decimal]) -> bool:
+    return any(amount not in allowed for amount in extract_amounts(text))
+
+
 def enforce_amount_rule(reply: str, data_context: dict[str, Any], quotes: list[str]) -> str:
     allowed = allowed_amounts(data_context, quotes)
-    for amount in extract_amounts(reply):
-        if amount not in allowed:
-            return LEDGER_ONLY
-    return reply
+    if not _has_disallowed_amount(reply, allowed):
+        return reply
+    kept = [
+        sentence.strip()
+        for sentence in _SENTENCE.findall(reply)
+        if sentence.strip() and not _has_disallowed_amount(sentence, allowed)
+    ]
+    cleaned = " ".join(kept).strip()
+    return cleaned or LEDGER_ONLY
 
 
 def _quote_fragment(quote: str) -> str:
@@ -178,6 +192,10 @@ async def run_policy_qa(
     if isinstance(chunks, list):
         quotes.extend(str(chunk.get("quote") or "") for chunk in chunks)
     reply = enforce_amount_rule(reply, context, quotes)
+    if reply == LEDGER_ONLY and isinstance(chunks, list) and chunks:
+        quote = str(chunks[0].get("quote") or "").strip()
+        if quote:
+            reply = f"From the policy wording: {quote}"
     balance = context.get("get_balance")
     if not isinstance(balance, dict) or not balance:
         balance = None

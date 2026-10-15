@@ -121,7 +121,7 @@ async def synthesize_node(state: ForensicsState, config: RunnableConfig) -> dict
             "tools_used": list(state.get("used") or []),
             "observations": observations,
             "explanation": explanation,
-            "disputes": disputes_for(request) if int(request.get("attempt") or 1) == 1 else disputes_for(request),
+            "disputes": disputes_for(request),
             "needs_manual_review": critical,
             "manual_review_reasons": flags if critical else [],
         }

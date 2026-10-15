@@ -32,7 +32,7 @@ def parse_json_object(text: str) -> dict:
 
 
 class GeminiJsonLLM:
-    def __init__(self, api_key: str, model: str = "gemini-3.8-flash") -> None:
+    def __init__(self, api_key: str, model: str = "gemini-3.1-flash-lite") -> None:
         self.api_key = api_key
         self.model = model
         self._llm = None

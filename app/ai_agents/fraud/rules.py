@@ -26,7 +26,8 @@ def score_claim(claim: dict[str, Any]) -> dict[str, Any]:
 
     if amount is None:
         flags.append(_flag("MISSING_AMOUNT", "medium", "This claim has no amount stored."))
-    if amount is not None and sum_insured is not None and amount > sum_insured:
+    over_sum = amount is not None and sum_insured is not None and amount > sum_insured
+    if over_sum:
         flags.append(
             _flag(
                 "CLAIM_OVER_SUM_INSURED",
@@ -34,7 +35,12 @@ def score_claim(claim: dict[str, Any]) -> dict[str, Any]:
                 "The claim amount is above the policy sum insured.",
             )
         )
-    if amount is not None and remaining is not None and amount > remaining:
+    if (
+        not over_sum
+        and amount is not None
+        and remaining is not None
+        and amount > remaining
+    ):
         flags.append(
             _flag(
                 "CLAIM_OVER_BALANCE",
@@ -42,7 +48,7 @@ def score_claim(claim: dict[str, Any]) -> dict[str, Any]:
                 "The claim amount is above the remaining balance.",
             )
         )
-    if amount is not None:
+    if amount is not None and amount > 0:
         others = [_money(item) for item in claim.get("other_claim_amounts") or []]
         if any(other == amount for other in others):
             flags.append(

@@ -26,8 +26,10 @@
     .error { color: #8a2b2b; margin-top: 8px; }
     a { color: #1f4d3a; }
   </style>
+  <link rel="stylesheet" href="/static/site.css" />
 </head>
 <body>
+  <div id="site-nav"></div>
   <main>
     <h1>Claim review</h1>
     <p class="lede">Sign in as the insurance company, choose a claim, and read the recommendation. A person still approves or rejects it.</p>
@@ -67,7 +69,7 @@
       <button id="reject" class="reject" type="button">Reject</button>
       <div id="decision-error" class="error"></div>
     </section>
-    <p class="lede"><a href="/file">File a claim</a> · <a href="/status">Claim status</a> · <a href="/">Policy assistant</a></p>
+    <p class="lede"><a href="/">Home</a></p>
   </main>
   <script>
     const loginForm = document.getElementById("login");
@@ -216,5 +218,6 @@
     document.getElementById("accept").addEventListener("click", () => saveChoice("accept"));
     document.getElementById("reject").addEventListener("click", () => saveChoice("reject"));
   </script>
+  <script src="/static/guide.js"></script>
 </body>
 </html>

@@ -14,6 +14,8 @@ CRITICAL_FLAGS = {
     "ID_MISMATCH",
 }
 
+EARLY_CLAIM_DAYS = 7
+
 FLAG_TOOL = {
     "ARITHMETIC_MISMATCH": "arithmetic_gst",
     "GST_MISMATCH": "arithmetic_gst",
@@ -218,18 +220,33 @@ def id_redaction(request: dict[str, Any]) -> dict:
     return result("id_redaction", ok=True, score=0.3 if flags else 0, flags=flags, evidence=evidence)
 
 
+def early_claim(request: dict[str, Any]) -> bool:
+    policy = request.get("policy") or {}
+    start = parse_day(policy.get("start_date"))
+    incident = parse_day(request.get("incident_date"))
+    if start is None or incident is None:
+        return False
+    gap = (incident - start).days
+    return 0 <= gap <= EARLY_CLAIM_DAYS
+
+
 def behavioral(request: dict[str, Any]) -> dict:
     behavior = request.get("behavior") or {}
     recent = int(behavior.get("recent_claims_30d") or 0)
     prior = int(behavior.get("prior_fraud_flags") or 0)
-    flags = []
-    if recent >= 3 or prior > 0:
+    flags: list[str] = []
+    notes: list[str] = []
+    if recent >= 3:
         flags.append("BEHAVIORAL_VELOCITY")
-    evidence = (
-        f"{recent} other claims were filed in the last 30 days."
-        if flags
-        else "Recent claim activity is within a normal range."
-    )
+        notes.append(f"{recent} other claims were filed in the last 30 days.")
+    if prior > 0:
+        if "BEHAVIORAL_VELOCITY" not in flags:
+            flags.append("BEHAVIORAL_VELOCITY")
+        notes.append("This policy already has prior fraud flags.")
+    if early_claim(request):
+        flags.append("VERY_EARLY_CLAIM")
+        notes.append(f"The incident date is within {EARLY_CLAIM_DAYS} days of the policy start.")
+    evidence = " ".join(notes) if notes else "Recent claim activity is within a normal range."
     return result("behavioral", ok=True, score=0.45 if flags else 0, flags=flags, evidence=evidence)
 
 
