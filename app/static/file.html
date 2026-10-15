@@ -172,7 +172,12 @@
           error.textContent = body.detail || "The claim was not filed";
           return;
         }
-        document.getElementById("filed").textContent = body.claim_number + " is " + body.status + ". You can follow it on the status page.";
+        const filed = document.getElementById("filed");
+        filed.textContent = body.claim_number + " is " + body.status + ". ";
+        const statusLink = document.createElement("a");
+        statusLink.href = "/status";
+        statusLink.textContent = "Open this claim on the status page";
+        filed.append(statusLink);
       } finally {
         document.getElementById("submit").disabled = false;
       }
