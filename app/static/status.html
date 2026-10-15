@@ -21,8 +21,10 @@
     .error { color: #8a2b2b; margin-top: 8px; }
     a { color: #1f4d3a; }
   </style>
+  <link rel="stylesheet" href="/static/site.css" />
 </head>
 <body>
+  <div id="site-nav"></div>
   <main>
     <h1>Claim status</h1>
     <p class="lede">Sign in to see the claims you filed and whether the insurer accepted them.</p>
@@ -35,7 +37,7 @@
       <div id="login-error" class="error"></div>
     </form>
     <section id="list"></section>
-    <p class="lede"><a href="/file">File a claim</a> · <a href="/">Policy assistant</a></p>
+    <p class="lede"><a href="/">Home</a></p>
   </main>
   <script>
     async function readJson(response) {
@@ -109,5 +111,6 @@
       }
     }
   </script>
+  <script src="/static/guide.js"></script>
 </body>
 </html>

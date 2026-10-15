@@ -23,8 +23,10 @@
     .error { color: #8a2b2b; margin-top: 8px; }
     a { color: #1f4d3a; }
   </style>
+  <link rel="stylesheet" href="/static/site.css" />
 </head>
 <body>
+  <div id="site-nav"></div>
   <main>
     <h1>File a claim</h1>
     <p class="lede">Sign in, choose your policy, and upload the documents for this claim.</p>
@@ -51,7 +53,7 @@
       <div id="form-error" class="error"></div>
       <p id="filed" class="lede"></p>
     </section>
-    <p class="lede"><a href="/status">Claim status</a> · <a href="/review">Insurer review</a></p>
+    <p class="lede"><a href="/">Home</a></p>
   </main>
   <script>
     const loginForm = document.getElementById("login");
@@ -176,5 +178,6 @@
       }
     });
   </script>
+  <script src="/static/guide.js"></script>
 </body>
 </html>
