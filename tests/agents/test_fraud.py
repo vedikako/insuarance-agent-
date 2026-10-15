@@ -7,6 +7,10 @@ from app.ai_agents.fraud.rules import score_claim
 from app.ai_agents.fraud.runner import run_fraud_review
 from app.api.policy_chat import Actor
 from app.main import app
+
+from app.ai_agents.fraud.forensics.planner import planned_tools
+from app.ai_agents.fraud.forensics.tools import behavioral
+
 from app.services.fraud_data import SqlFraudData, build_claim_snapshot
 
 CLEAN = {
@@ -44,14 +48,26 @@ def test_amount_above_sum_insured_is_high():
     scored = score_claim({**CLEAN, "claim_amount": 600000})
     codes = [flag["code"] for flag in scored["flags"]]
     assert "CLAIM_OVER_SUM_INSURED" in codes
-    assert "CLAIM_OVER_BALANCE" in codes
+    assert "CLAIM_OVER_BALANCE" not in codes
     assert scored["risk"] == "high"
+
+
+def test_amount_above_remaining_balance_is_medium():
+    scored = score_claim({**CLEAN, "claim_amount": 490000, "remaining_balance": 480000})
+    codes = [flag["code"] for flag in scored["flags"]]
+    assert codes == ["CLAIM_OVER_BALANCE"]
+    assert scored["risk"] == "medium"
 
 
 def test_duplicate_amount_is_medium():
     scored = score_claim({**CLEAN, "other_claim_amounts": [10000]})
     assert scored["risk"] == "medium"
     assert scored["flags"][0]["code"] == "DUPLICATE_AMOUNT"
+
+
+def test_zero_amount_is_not_a_duplicate():
+    scored = score_claim({**CLEAN, "claim_amount": 0, "other_claim_amounts": [0]})
+    assert scored["flags"] == []
 
 
 def test_missing_amount_and_approved_above_claimed():
@@ -96,6 +112,35 @@ def test_invalid_claim_id_is_not_queried():
     assert session.called is False
 
 
+<<<<<<< HEAD
+=======
+def test_prior_flags_do_not_claim_a_burst_of_claims():
+    found = behavioral(
+        {
+            "incident_date": "2026-06-01",
+            "policy": {"start_date": "2026-01-01"},
+            "behavior": {"recent_claims_30d": 0, "prior_fraud_flags": 1},
+        }
+    )
+    assert found["flags"] == ["BEHAVIORAL_VELOCITY"]
+    assert "prior fraud flags" in found["evidence"]
+    assert "0 other claims" not in found["evidence"]
+
+
+def test_early_incident_is_flagged_and_planned():
+    request = {
+        "incident_date": "2026-01-03",
+        "policy": {"start_date": "2026-01-01"},
+        "behavior": {"recent_claims_30d": 0, "prior_fraud_flags": 0},
+        "documents": [],
+    }
+    found = behavioral(request)
+    assert found["flags"] == ["VERY_EARLY_CLAIM"]
+    assert "within 7 days" in found["evidence"]
+    assert planned_tools(request) == ["behavioral"]
+
+
+>>>>>>> ananyapoundrik
 def test_snapshot_uses_ledger_remaining_and_other_amounts():
     snapshot = build_claim_snapshot(
         claim_amount=10000,

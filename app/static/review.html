@@ -1,0 +1,223 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Claim review</title>
+  <style>
+    :root { color-scheme: light; font-family: Georgia, "Times New Roman", serif; }
+    body { margin: 0; background: #f4f1ea; color: #1c1915; }
+    main { max-width: 720px; margin: 0 auto; padding: 32px 20px 48px; }
+    h1 { font-size: 1.8rem; font-weight: 500; margin: 0 0 8px; }
+    p.lede { margin: 0 0 24px; color: #5c564c; }
+    form, section { background: #fffdf8; border: 1px solid #e4dccf; border-radius: 12px; padding: 16px; }
+    section { margin-top: 16px; }
+    label { display: block; font-size: 0.85rem; margin: 10px 0 4px; }
+    input, select, button { font: inherit; }
+    input, select { width: 100%; box-sizing: border-box; padding: 8px 10px; border: 1px solid #d9d0c3; border-radius: 8px; background: #fff; }
+    button { margin-top: 12px; margin-right: 8px; background: #1f4d3a; color: #fff; border: 0; border-radius: 8px; padding: 8px 14px; cursor: pointer; }
+    button.reject { background: #8a2b2b; }
+    button:disabled { opacity: 0.5; cursor: default; }
+    #desk { display: none; }
+    #result { display: none; }
+    dl { margin: 0; }
+    dt { margin-top: 14px; font-size: 0.85rem; color: #5c564c; }
+    dd { margin: 4px 0 0; white-space: pre-wrap; }
+    .error { color: #8a2b2b; margin-top: 8px; }
+    a { color: #1f4d3a; }
+  </style>
+  <link rel="stylesheet" href="/static/site.css" />
+</head>
+<body>
+  <div id="site-nav"></div>
+  <main>
+    <h1>Claim review</h1>
+    <p class="lede">Sign in as the insurance company, choose a claim, and read the recommendation. A person still approves or rejects it.</p>
+    <form id="login">
+      <label for="email">Email</label>
+      <input id="email" type="email" autocomplete="username" required />
+      <label for="password">Password</label>
+      <input id="password" type="password" autocomplete="current-password" required />
+      <button type="submit">Sign in</button>
+      <div id="login-error" class="error"></div>
+    </form>
+    <section id="desk">
+      <label for="claim">Claim</label>
+      <select id="claim"></select>
+      <label for="claim-id">Claim id</label>
+      <input id="claim-id" type="text" autocomplete="off" />
+      <button id="run" type="button">Review claim</button>
+      <div id="desk-error" class="error"></div>
+    </section>
+    <section id="result">
+      <dl>
+        <dt>Recommended action</dt>
+        <dd id="action"></dd>
+        <dt>Fraud flags</dt>
+        <dd id="flags"></dd>
+        <dt>Narrative</dt>
+        <dd id="narrative"></dd>
+        <dt>Settlement decision</dt>
+        <dd id="decision"></dd>
+        <dt>Payable amount</dt>
+        <dd id="payable"></dd>
+        <dt>Claim status</dt>
+        <dd id="claim-status"></dd>
+      </dl>
+      <p class="lede">Accept or Reject saves your choice on this claim. Closing the page before that drops the recommendation.</p>
+      <button id="accept" type="button">Accept</button>
+      <button id="reject" class="reject" type="button">Reject</button>
+      <div id="decision-error" class="error"></div>
+    </section>
+    <p class="lede"><a href="/">Home</a></p>
+  </main>
+  <script>
+    const loginForm = document.getElementById("login");
+    const desk = document.getElementById("desk");
+    const claimSelect = document.getElementById("claim");
+    const claimId = document.getElementById("claim-id");
+    let token = "";
+
+    function authHeaders() {
+      return { Authorization: "Bearer " + token, "Content-Type": "application/json" };
+    }
+
+    function companyRole(role) {
+      return role === "INSURANCE_COMPANY" || role === "INSURER_ADMIN" || role === "CLAIM_ADJUSTER";
+    }
+
+    loginForm.addEventListener("submit", async (event) => {
+      event.preventDefault();
+      document.getElementById("login-error").textContent = "";
+      const response = await fetch("/api/auth/login", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          email: document.getElementById("email").value,
+          password: document.getElementById("password").value,
+        }),
+      });
+      const body = await readJson(response);
+      if (!response.ok) {
+        document.getElementById("login-error").textContent = body.detail || "Sign in failed";
+        return;
+      }
+      if (!companyRole(body.user.role)) {
+        document.getElementById("login-error").textContent = "Only the insurance company can review claims.";
+        return;
+      }
+      token = body.access_token;
+      loginForm.style.display = "none";
+      desk.style.display = "block";
+      await loadClaims();
+    });
+
+    async function loadClaims() {
+      const response = await fetch("/api/claims", { headers: authHeaders() });
+      const claims = await response.json();
+      claimSelect.innerHTML = "";
+      const blank = document.createElement("option");
+      blank.value = "";
+      blank.textContent = "Type a claim id, or pick one";
+      claimSelect.appendChild(blank);
+      for (const claim of claims) {
+        const option = document.createElement("option");
+        option.value = claim.id;
+        option.textContent = claim.claim_number + " · " + claim.status + " · " + claim.claim_amount;
+        claimSelect.appendChild(option);
+      }
+    }
+
+    claimSelect.addEventListener("change", () => {
+      claimId.value = claimSelect.value;
+    });
+
+    function showText(id, value) {
+      document.getElementById(id).textContent = value;
+    }
+
+    async function readJson(response) {
+      const text = await response.text();
+      try {
+        return text ? JSON.parse(text) : {};
+      } catch (err) {
+        return { detail: "The server could not complete that request." };
+      }
+    }
+
+    document.getElementById("run").addEventListener("click", async () => {
+      const id = claimId.value.trim();
+      const error = document.getElementById("desk-error");
+      error.textContent = "";
+      document.getElementById("result").style.display = "none";
+      if (!id) {
+        error.textContent = "Choose or enter a claim id.";
+        return;
+      }
+      document.getElementById("run").disabled = true;
+      try {
+        const payload = JSON.stringify({ claim_id: id });
+        const [reviewResponse, settlementResponse] = await Promise.all([
+          fetch("/api/reviews", { method: "POST", headers: authHeaders(), body: payload }),
+          fetch("/api/settlements", { method: "POST", headers: authHeaders(), body: payload }),
+        ]);
+        const review = await readJson(reviewResponse);
+        const settlement = await readJson(settlementResponse);
+        if (!reviewResponse.ok) {
+          error.textContent = review.detail || "The review failed";
+          return;
+        }
+        if (!settlementResponse.ok) {
+          error.textContent = settlement.detail || "Settlement failed";
+          return;
+        }
+        const flags = (review.fraud && review.fraud.flags) || [];
+        showText("action", review.recommended_action || "");
+        showText("flags", flags.length ? flags.join("\n") : "None");
+        showText("narrative", review.narrative || "");
+        showText("decision", settlement.decision || "");
+        showText("payable", settlement.payable_amount == null ? "" : String(settlement.payable_amount));
+        showText("claim-status", "Not saved yet");
+        document.getElementById("accept").disabled = false;
+        document.getElementById("reject").disabled = false;
+        document.getElementById("result").style.display = "block";
+      } finally {
+        document.getElementById("run").disabled = false;
+      }
+    });
+
+    async function saveChoice(choice) {
+      const id = claimId.value.trim();
+      const error = document.getElementById("decision-error");
+      error.textContent = "";
+      const payableText = document.getElementById("payable").textContent.trim();
+      const body = { choice: choice };
+      if (choice === "accept" && payableText) {
+        body.payable_amount = Number(payableText);
+      }
+      document.getElementById("accept").disabled = true;
+      document.getElementById("reject").disabled = true;
+      const response = await fetch("/api/claims/" + id + "/decision", {
+        method: "POST",
+        headers: authHeaders(),
+        body: JSON.stringify(body),
+      });
+      const saved = await readJson(response);
+      if (!response.ok) {
+        error.textContent = saved.detail || "The decision was not saved";
+        document.getElementById("accept").disabled = false;
+        document.getElementById("reject").disabled = false;
+        return;
+      }
+      showText("claim-status", saved.status);
+      await loadClaims();
+      claimId.value = id;
+      claimSelect.value = id;
+    }
+
+    document.getElementById("accept").addEventListener("click", () => saveChoice("accept"));
+    document.getElementById("reject").addEventListener("click", () => saveChoice("reject"));
+  </script>
+  <script src="/static/guide.js"></script>
+</body>
+</html>

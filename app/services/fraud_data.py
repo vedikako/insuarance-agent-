@@ -83,7 +83,9 @@ class SqlFraudData:
                 """
                 SELECT claim_amount
                 FROM claims
-                WHERE policy_id = :policy_id AND id <> :claim_id
+                WHERE policy_id = :policy_id
+                  AND id <> :claim_id
+                  AND UPPER(status::text) NOT IN ('REJECTED', 'CANCELLED', 'CANCELED')
                 """
             ),
             {"policy_id": policy_id, "claim_id": claim_id},

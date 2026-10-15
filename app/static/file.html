@@ -1,0 +1,183 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>File a claim</title>
+  <style>
+    :root { color-scheme: light; font-family: Georgia, "Times New Roman", serif; }
+    body { margin: 0; background: #f4f1ea; color: #1c1915; }
+    main { max-width: 720px; margin: 0 auto; padding: 32px 20px 48px; }
+    h1 { font-size: 1.8rem; font-weight: 500; margin: 0 0 8px; }
+    p.lede { margin: 0 0 24px; color: #5c564c; }
+    form, section { background: #fffdf8; border: 1px solid #e4dccf; border-radius: 12px; padding: 16px; }
+    section { margin-top: 16px; }
+    label { display: block; font-size: 0.85rem; margin: 10px 0 4px; }
+    input, select, button, textarea { font: inherit; }
+    input, select, textarea { width: 100%; box-sizing: border-box; padding: 8px 10px; border: 1px solid #d9d0c3; border-radius: 8px; background: #fff; }
+    button { margin-top: 12px; margin-right: 8px; background: #1f4d3a; color: #fff; border: 0; border-radius: 8px; padding: 8px 14px; cursor: pointer; }
+    button.secondary { background: #5c564c; }
+    button:disabled { opacity: 0.5; cursor: default; }
+    #form { display: none; }
+    .doc { margin-top: 12px; padding-top: 8px; border-top: 1px solid #e4dccf; }
+    .error { color: #8a2b2b; margin-top: 8px; }
+    a { color: #1f4d3a; }
+  </style>
+  <link rel="stylesheet" href="/static/site.css" />
+</head>
+<body>
+  <div id="site-nav"></div>
+  <main>
+    <h1>File a claim</h1>
+    <p class="lede">Sign in, choose your policy, and upload the documents for this claim.</p>
+    <form id="login">
+      <label for="email">Email</label>
+      <input id="email" type="email" autocomplete="username" required />
+      <label for="password">Password</label>
+      <input id="password" type="password" autocomplete="current-password" required />
+      <button type="submit">Sign in</button>
+      <div id="login-error" class="error"></div>
+    </form>
+    <section id="form">
+      <label for="policy">Policy</label>
+      <select id="policy"></select>
+      <label for="amount">Claim amount</label>
+      <input id="amount" type="number" min="1" step="0.01" required />
+      <label for="incident">Incident date</label>
+      <input id="incident" type="date" />
+      <label for="description">What happened</label>
+      <textarea id="description" rows="3"></textarea>
+      <div id="documents"></div>
+      <button id="add-doc" class="secondary" type="button">Add another document</button>
+      <button id="submit" type="button">Submit claim</button>
+      <div id="form-error" class="error"></div>
+      <p id="filed" class="lede"></p>
+    </section>
+    <p class="lede"><a href="/">Home</a></p>
+  </main>
+  <script>
+    const loginForm = document.getElementById("login");
+    const form = document.getElementById("form");
+    const documents = document.getElementById("documents");
+    let token = "";
+    const types = ["HOSPITAL_BILL", "DISCHARGE_SUMMARY", "AADHAAR", "PAN", "REPAIR_ESTIMATE", "FIR", "RC"];
+
+    function authHeaders() {
+      return { Authorization: "Bearer " + token };
+    }
+
+    async function readJson(response) {
+      const text = await response.text();
+      try {
+        return text ? JSON.parse(text) : {};
+      } catch (err) {
+        return {};
+      }
+    }
+
+    loginForm.addEventListener("submit", async (event) => {
+      event.preventDefault();
+      document.getElementById("login-error").textContent = "";
+      const response = await fetch("/api/auth/login", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          email: document.getElementById("email").value,
+          password: document.getElementById("password").value,
+        }),
+      });
+      const body = await readJson(response);
+      if (!response.ok) {
+        document.getElementById("login-error").textContent = body.detail || "Sign in failed";
+        return;
+      }
+      if (body.user.role !== "CUSTOMER") {
+        document.getElementById("login-error").textContent = "Only a customer can file a claim.";
+        return;
+      }
+      token = body.access_token;
+      loginForm.style.display = "none";
+      form.style.display = "block";
+      await loadPolicies();
+      addDocumentRow();
+    });
+
+    async function loadPolicies() {
+      const response = await fetch("/api/policies", { headers: authHeaders() });
+      const policies = await response.json();
+      const select = document.getElementById("policy");
+      select.innerHTML = "";
+      for (const policy of policies) {
+        const option = document.createElement("option");
+        option.value = policy.id;
+        option.textContent = policy.policy_number + " · " + policy.policy_type + " · " + policy.status;
+        select.appendChild(option);
+      }
+      if (!policies.length) {
+        document.getElementById("form-error").textContent = "No policies are available for this account.";
+      }
+    }
+
+    function addDocumentRow() {
+      const row = document.createElement("div");
+      row.className = "doc";
+      const type = document.createElement("select");
+      for (const name of types) {
+        const option = document.createElement("option");
+        option.value = name;
+        option.textContent = name.replaceAll("_", " ");
+        type.appendChild(option);
+      }
+      const file = document.createElement("input");
+      file.type = "file";
+      file.accept = ".pdf,.png,.jpg,.jpeg,application/pdf,image/png,image/jpeg";
+      row.appendChild(type);
+      row.appendChild(file);
+      documents.appendChild(row);
+    }
+
+    document.getElementById("add-doc").addEventListener("click", addDocumentRow);
+
+    document.getElementById("submit").addEventListener("click", async () => {
+      const error = document.getElementById("form-error");
+      error.textContent = "";
+      document.getElementById("filed").textContent = "";
+      const payload = new FormData();
+      payload.append("policy_id", document.getElementById("policy").value);
+      payload.append("claim_amount", document.getElementById("amount").value);
+      payload.append("description", document.getElementById("description").value);
+      payload.append("incident_date", document.getElementById("incident").value);
+      const rows = documents.querySelectorAll(".doc");
+      let attached = 0;
+      for (const row of rows) {
+        const file = row.querySelector("input").files[0];
+        if (!file) continue;
+        payload.append("document_types", row.querySelector("select").value);
+        payload.append("files", file);
+        attached += 1;
+      }
+      if (!attached) {
+        error.textContent = "Upload at least one PDF, PNG, or JPEG.";
+        return;
+      }
+      document.getElementById("submit").disabled = true;
+      try {
+        const response = await fetch("/api/claims", {
+          method: "POST",
+          headers: authHeaders(),
+          body: payload,
+        });
+        const body = await readJson(response);
+        if (!response.ok) {
+          error.textContent = body.detail || "The claim was not filed";
+          return;
+        }
+        document.getElementById("filed").textContent = body.claim_number + " is " + body.status + ". You can follow it on the status page.";
+      } finally {
+        document.getElementById("submit").disabled = false;
+      }
+    });
+  </script>
+  <script src="/static/guide.js"></script>
+</body>
+</html>

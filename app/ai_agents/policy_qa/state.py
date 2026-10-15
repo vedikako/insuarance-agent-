@@ -11,6 +11,7 @@ class PolicyQAState(TypedDict, total=False):
     tools_needed: list[str]
     supervisor_reason: str
     direct_reply: str
+    skip_model_reply: bool
     data_context: dict[str, Any]
     tool_calls: list[dict[str, Any]]
     reply: str

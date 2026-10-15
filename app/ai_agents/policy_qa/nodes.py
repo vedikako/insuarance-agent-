@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import json
 import logging
+import re
+from decimal import Decimal
 from typing import Any, Literal
 
 logger = logging.getLogger(__name__)
@@ -15,12 +17,56 @@ from app.ai_agents.policy_qa.tools import MAX_TOOL_CALLS, TOOL_NAMES, execute_to
 from app.services.policy_data import PolicyDataPort
 
 DIRECT_FALLBACK = "Hello. Ask about this policy's cover, or how much is left to claim."
+_MONEY = re.compile(
+    r"how much|still claim|left to claim|remaining|balance|already claimed|sum insured|amount left",
+    re.IGNORECASE,
+)
+_WORDING = re.compile(
+    r"cover|exclusion|waiting|clause|wording|deductible|room rent|cataract",
+    re.IGNORECASE,
+)
 
 
 def _configurable(config: RunnableConfig | None) -> dict[str, Any]:
     if not config:
         return {}
     return config.get("configurable") or {}
+
+
+def _plain_amount(value: Any) -> str:
+    number = Decimal(str(value))
+    if number == number.to_integral_value():
+        return str(number.quantize(Decimal("1")))
+    return format(number.normalize(), "f")
+
+
+def tools_for(message: str) -> list[str]:
+    if _MONEY.search(message) and not _WORDING.search(message):
+        return ["get_balance"]
+    tools: list[str] = []
+    if _MONEY.search(message):
+        tools.append("get_balance")
+    if _WORDING.search(message) or not tools:
+        tools.append("retrieve_clauses")
+    return tools
+
+
+def reply_from_records(context: dict[str, Any]) -> str:
+    balance = context.get("get_balance")
+    if isinstance(balance, dict) and balance.get("remaining_balance") is not None:
+        remaining = _plain_amount(balance["remaining_balance"])
+        parts = [f"You can still claim {remaining} INR on this policy."]
+        if balance.get("sum_insured") is not None and balance.get("utilized") is not None:
+            insured = _plain_amount(balance["sum_insured"])
+            used = _plain_amount(balance["utilized"])
+            parts.append(f"The sum insured is {insured} INR and {used} INR has already been used.")
+        return " ".join(parts)
+    chunks = context.get("retrieve_clauses")
+    if isinstance(chunks, list) and chunks:
+        quote = str(chunks[0].get("quote") or "").strip()
+        if quote:
+            return f"From the policy wording: {quote}"
+    return ""
 
 
 def _history_text(history: list[dict[str, Any]]) -> str:
@@ -35,18 +81,32 @@ def _history_text(history: list[dict[str, Any]]) -> str:
 async def supervisor_node(state: PolicyQAState, config: RunnableConfig) -> dict[str, Any]:
     llm: JsonLLM = _configurable(config)["llm"]
     logger.info("supervisor start")
+    message = state.get("message") or ""
+    if _MONEY.search(message) and not _WORDING.search(message):
+        logger.info("supervisor route=data tools=['get_balance'] source=ledger")
+        return {
+            "route": "data",
+            "tools_needed": ["get_balance"],
+            "supervisor_reason": "The question asks for an amount stored on the ledger.",
+            "direct_reply": "",
+            "skip_model_reply": True,
+        }
     user = (
         f"Recent turns:\n{_history_text(state.get('history') or [])}\n\n"
-        f"Latest message:\n{state.get('message', '')}"
+        f"Latest message:\n{message}"
     )
     try:
         raw = await llm.complete(SUPERVISOR_PROMPT, user)
         decision = parse_json_object(raw)
     except Exception:
         logger.exception("Policy Q&A supervisor failed")
+        tools = tools_for(message)
+        logger.info("supervisor route=data tools=%s source=fallback", tools)
         return {
-            "error_code": "MODEL_UNAVAILABLE",
-            "error_message": "The supervisor could not decide a route.",
+            "route": "data",
+            "tools_needed": tools,
+            "supervisor_reason": "The model did not answer, so the question was sent to the policy records.",
+            "direct_reply": "",
         }
     route = str(decision.get("route") or "").lower()
     if route in {"data_node", "data"}:
@@ -138,13 +198,19 @@ async def data_node(state: PolicyQAState, config: RunnableConfig) -> dict[str, A
 async def synthesizer_node(state: PolicyQAState, config: RunnableConfig) -> dict[str, Any]:
     if state.get("error_code") == "TOOL_FAILED":
         return {"reply": "I could not read this policy's records just now."}
+    context = state.get("data_context") or {}
+    if state.get("skip_model_reply"):
+        reply = reply_from_records(context)
+        if reply:
+            logger.info("synthesizer done source=records chars=%s", len(reply))
+            return {"reply": reply, "cited_chunk_ids": []}
     logger.info("synthesizer start")
     llm: JsonLLM = _configurable(config)["llm"]
     user = json.dumps(
         {
             "message": state.get("message"),
             "history": state.get("history") or [],
-            "data_context": state.get("data_context") or {},
+            "data_context": context,
         },
         default=str,
     )
@@ -152,6 +218,10 @@ async def synthesizer_node(state: PolicyQAState, config: RunnableConfig) -> dict
         raw = await llm.complete(SYNTHESIZER_PROMPT, user)
         parsed = parse_json_object(raw)
     except Exception:
+        logger.exception("Policy Q&A synthesizer failed")
+        reply = reply_from_records(context)
+        if reply:
+            return {"reply": reply, "cited_chunk_ids": []}
         return {
             "error_code": "MODEL_UNAVAILABLE",
             "error_message": "The synthesizer could not write a reply.",

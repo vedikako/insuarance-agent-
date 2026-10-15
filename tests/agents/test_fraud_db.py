@@ -58,7 +58,7 @@ async def _check_live_database() -> None:
         sample = await session.execute(text("SELECT id::text AS id FROM claims LIMIT 1"))
         sample_row = sample.first()
         if sample_row is None:
-            missing_claim = await data.load_claim("missing-claim")
+            missing_claim = await data.load_claim("00000000-0000-0000-0000-000000000000")
             assert missing_claim is None
             return
 
