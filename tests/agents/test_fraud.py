@@ -112,8 +112,6 @@ def test_invalid_claim_id_is_not_queried():
     assert session.called is False
 
 
-<<<<<<< HEAD
-=======
 def test_prior_flags_do_not_claim_a_burst_of_claims():
     found = behavioral(
         {
@@ -140,7 +138,6 @@ def test_early_incident_is_flagged_and_planned():
     assert planned_tools(request) == ["behavioral"]
 
 
->>>>>>> ananyapoundrik
 def test_snapshot_uses_ledger_remaining_and_other_amounts():
     snapshot = build_claim_snapshot(
         claim_amount=10000,
