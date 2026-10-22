@@ -96,7 +96,13 @@
       const claims = await response.json();
       list.innerHTML = "";
       if (!claims.length) {
-        list.textContent = "You have not filed a claim yet.";
+        const note = document.createElement("p");
+        note.textContent = "No claims yet. ";
+        const fileLink = document.createElement("a");
+        fileLink.href = "/file";
+        fileLink.textContent = "File a claim";
+        note.append(fileLink);
+        list.appendChild(note);
         return;
       }
       for (const claim of claims) {
